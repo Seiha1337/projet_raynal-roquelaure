@@ -204,3 +204,4 @@ pio device monitor -b 115200 -p COM4
 
 ## Licence
 Projet pédagogique - BTS CIEL 2025-2026
+Armand Payen
