@@ -446,3 +446,6 @@ ERROR 2026-03-13T12:40:33.163 ..\..\qModMaster\src\modbusadapter.cpp @ 291 Read 
 ERROR 2026-03-13T12:40:34.157 ..\..\qModMaster\src\modbusadapter.cpp @ 291 Read Data failed.  "Error : No error" 
 ERROR 2026-03-13T12:40:35.164 ..\..\qModMaster\src\modbusadapter.cpp @ 291 Read Data failed.  "Error : No error" 
 ERROR 2026-03-13T12:40:36.396 ..\..\qModMaster\src\modbusadapter.cpp @ 136 Connection to IP :  "192.168.10.50" : 502 ...failed. Could not connect to TCP port 
+ERROR 2026-03-16T14:56:52.615 ..\..\qModMaster\src\modbusadapter.cpp @ 136 Connection to IP :  "192.168.10.60" : 502 ...failed. Could not connect to TCP port 
+ERROR 2026-03-16T14:59:35.073 ..\..\qModMaster\src\modbusadapter.cpp @ 136 Connection to IP :  "172.16.10.210" : 502 ...failed. Could not connect to TCP port 
+ERROR 2026-03-16T15:00:08.683 ..\..\qModMaster\src\modbusadapter.cpp @ 136 Connection to IP :  "172.16.10.210" : 502 ...failed. Could not connect to TCP port 
