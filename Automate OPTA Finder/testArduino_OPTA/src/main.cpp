@@ -11,6 +11,7 @@ imposez le bon avant de transférer le code
 const char ssid[] = "Wifi_Iot215"; 
 const char password[] = "CIEL1234#+";
 
+
 // Serveur web sur le port 80
 WiFiServer server(80);
 
