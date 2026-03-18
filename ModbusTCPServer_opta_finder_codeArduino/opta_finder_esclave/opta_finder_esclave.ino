@@ -5,16 +5,16 @@ imposez le bon avant de transférer le code
 */
 
 #include <Arduino.h>
-#include <WiFi.h>
+#include <Ethernet.h>
 #include <ArduinoModbus.h>
 
-// ========== CONFIGURATION WiFi ==========
-const char ssid[] = "Wifi_Iot215"; 
-const char password[] = "CIEL1234#+";
+// ========== CONFIGURATION ETHERNET (IP FIXE) ==========
+byte mac[] = { 0xA8, 0x61, 0x0A, 0xAE, 0x76, 0x05 }; 
+IPAddress ip(192, 168, 50, 210);                      
 
 // ========== SERVEURS ==========
-WiFiServer webServer(80);     // Serveur web sur le port 80
-WiFiServer modbusServer(502); // Serveur Modbus sur le port 502
+EthernetServer webServer(80);     // Serveur web sur le port 80
+EthernetServer modbusServer(502); // Serveur Modbus sur le port 502
 ModbusTCPServer modbusTCPServer;
 
 // ========== VARIABLES D'ÉTAT ==========
@@ -30,99 +30,131 @@ int fausseTemperature = 200; // 20.0 °C
 unsigned long previousMillisLED = 0;
 int ledStep = 0;
 
-// ========== PAGE HTML/CSS EMBARQUÉE ==========
+// ========== PAGE HTML/CSS EMBARQUÉE (DESIGN R&R) ==========
 const char webpage[] PROGMEM = R"rawliteral(
 <!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arduino OPTA</title>
-    <meta http-equiv="refresh" content="3">
+    <title>Supervision Autoclave - Raynal & Roquelaure</title>
+    <meta http-equiv="refresh" content="2">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); min-height: 100vh; padding: 20px; }
-        .container { max-width: 800px; margin: 0 auto; }
-        h1 { color: white; text-align: center; margin-bottom: 10px; font-size: 2.5em; text-shadow: 2px 2px 4px rgba(0,0,0,0.3); }
-        .subtitle { text-align: center; color: rgba(255,255,255,0.9); margin-bottom: 30px; font-size: 1.1em; }
-        .info-card { background: white; border-radius: 15px; padding: 20px; margin-bottom: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
-        .info-card p { color: #666; line-height: 1.8; margin-bottom: 8px; }
-        .info-card strong { color: #333; }
-        .relays-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; margin-bottom: 20px; }
-        .relay-card { background: white; border-radius: 15px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); text-align: center; }
-        .relay-card h3 { color: #333; margin-bottom: 15px; font-size: 1.3em; }
-        .relay-buttons { display: flex; gap: 10px; margin-bottom: 15px; }
-        .relay-state { margin-top: 10px; padding: 8px; border-radius: 5px; font-weight: bold; font-size: 1.1em; }
-        .btn { flex: 1; padding: 12px; font-size: 1em; border: none; border-radius: 8px; cursor: pointer; transition: all 0.3s ease; font-weight: bold; text-transform: uppercase; text-decoration: none; display: inline-block; color: white; }
-        .btn-on { background: #4CAF50; }
-        .btn-on:hover { background: #45a049; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(76, 175, 80, 0.4); }
-        .btn-off { background: #f44336; }
-        .btn-off:hover { background: #da190b; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(244, 67, 54, 0.4); }
-        .inputs-section { background: white; border-radius: 15px; padding: 20px; box-shadow: 0 10px 30px rgba(0,0,0,0.3); }
-        .inputs-section h3 { color: #333; margin-bottom: 20px; text-align: center; }
+        body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: #1a1a1a; color: #ffffff; min-height: 100vh; padding: 20px; }
+        .container { max-width: 900px; margin: 0 auto; }
+        
+        /* Bandeau Raynal & Roquelaure */
+        .header { background-color: #c8102e; padding: 20px; border-radius: 10px; margin-bottom: 20px; box-shadow: 0 4px 15px rgba(200, 16, 46, 0.3); border-bottom: 4px solid #f1c40f; }
+        h1 { color: white; text-align: center; margin-bottom: 5px; font-size: 2.2em; letter-spacing: 2px; text-transform: uppercase; }
+        .subtitle { text-align: center; color: #f1c40f; font-size: 1.2em; font-weight: bold; }
+        
+        /* Cartes d'information */
+        .card { background: #2d2d2d; border: 1px solid #444; border-radius: 10px; padding: 20px; margin-bottom: 20px; box-shadow: 0 5px 15px rgba(0,0,0,0.5); }
+        .card h3 { color: #f1c40f; margin-bottom: 15px; font-size: 1.3em; text-align: center; border-bottom: 1px solid #444; padding-bottom: 10px; }
+        
+        /* Section Modbus */
+        .modbus-grid { display: flex; gap: 20px; margin-bottom: 20px; }
+        .modbus-box { flex: 1; background: #222; border-radius: 8px; padding: 15px; text-align: center; border: 1px solid #555; }
+        .modbus-label { color: #aaa; font-size: 0.9em; text-transform: uppercase; margin-bottom: 5px; }
+        .modbus-value { font-size: 2.5em; font-weight: bold; color: #fff; }
+        .val-temp { color: #e74c3c; }
+        .val-cons { color: #2ecc71; }
+        
+        .info-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; color: #ccc; }
+        .info-grid p { margin: 5px 0; }
+        .info-grid strong { color: #fff; }
+
+        /* Grilles Relais et Entrées */
+        .relays-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 15px; }
+        .relay-card { background: #222; border-radius: 10px; padding: 15px; text-align: center; border: 1px solid #444; }
+        .relay-card h4 { color: #fff; margin-bottom: 15px; }
+        .relay-buttons { display: flex; gap: 10px; margin-bottom: 10px; }
+        .relay-state { margin-top: 10px; padding: 5px; border-radius: 5px; font-weight: bold; }
+        
+        .btn { flex: 1; padding: 10px; font-size: 0.9em; border: none; border-radius: 5px; cursor: pointer; font-weight: bold; text-decoration: none; color: white; text-align: center; }
+        .btn-on { background: #27ae60; }
+        .btn-on:hover { background: #2ecc71; }
+        .btn-off { background: #c0392b; }
+        .btn-off:hover { background: #e74c3c; }
+        
         .inputs-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(80px, 1fr)); gap: 10px; }
-        .input-item { text-align: center; padding: 10px; border-radius: 8px; background: #f5f5f5; }
-        .input-label { font-weight: bold; color: #333; margin-bottom: 5px; }
+        .input-item { text-align: center; padding: 10px; border-radius: 8px; background: #1a1a1a; border: 1px solid #333; }
+        .input-label { font-weight: bold; color: #aaa; margin-bottom: 5px; }
         .input-state { font-size: 1.5em; margin-top: 5px; }
-        .state-high { color: #4CAF50; }
-        .state-low { color: #999; }
+        .state-high { color: #2ecc71; text-shadow: 0 0 10px #2ecc71; }
+        .state-low { color: #555; }
     </style>
 </head>
 <body>
     <div class="container">
-        <h1>⚡ Arduino OPTA</h1>
-        <p class="subtitle">Supervision Automate OPTA</p>
         
-        <div class="info-card">
-            <p><strong>📡 Connexion:</strong> WiFi</p>
-            <p><strong>🏷️ Hostname:</strong> HOSTNAME_PLACEHOLDER</p>
-            <p><strong>🌐 SSID:</strong> SSID_PLACEHOLDER</p>
-            <p><strong>📶 Signal:</strong> RSSI_PLACEHOLDER dBm</p>
-            <p><strong>🔌 IP:</strong> IP_PLACEHOLDER</p>
-            <p><strong>🆔 MAC:</strong> MAC_PLACEHOLDER</p>
-            <p><strong>🌡️ Modbus Temp:</strong> TEMP_PLACEHOLDER °C</p>
+        <div class="header">
+            <h1>RAYNAL & ROQUELAURE</h1>
+            <p class="subtitle">SUPERVISION AUTOCLAVE N°1 - OPTA</p>
         </div>
         
-        <div class="relays-grid">
-            <div class="relay-card">
-                <h3>🔌 Relais 1</h3>
-                <div class="relay-buttons">
-                    <a href="/RELAY1=ON" class="btn btn-on">ON</a>
-                    <a href="/RELAY1=OFF" class="btn btn-off">OFF</a>
-                </div>
-                <div class="relay-state RELAY1_CLASS">État: RELAY1_STATE</div>
+        <div class="modbus-grid">
+            <div class="modbus-box">
+                <div class="modbus-label">Température Cuve</div>
+                <div class="modbus-value val-temp">TEMP_PLACEHOLDER °C</div>
             </div>
-            
-            <div class="relay-card">
-                <h3>🔌 Relais 2</h3>
-                <div class="relay-buttons">
-                    <a href="/RELAY2=ON" class="btn btn-on">ON</a>
-                    <a href="/RELAY2=OFF" class="btn btn-off">OFF</a>
-                </div>
-                <div class="relay-state RELAY2_CLASS">État: RELAY2_STATE</div>
+            <div class="modbus-box">
+                <div class="modbus-label">Consigne Cible</div>
+                <div class="modbus-value val-cons">CONSIGNE_PLACEHOLDER °C</div>
             </div>
-            
-            <div class="relay-card">
-                <h3>🔌 Relais 3</h3>
-                <div class="relay-buttons">
-                    <a href="/RELAY3=ON" class="btn btn-on">ON</a>
-                    <a href="/RELAY3=OFF" class="btn btn-off">OFF</a>
-                </div>
-                <div class="relay-state RELAY3_CLASS">État: RELAY3_STATE</div>
-            </div>
-            
-            <div class="relay-card">
-                <h3>🔌 Relais 4</h3>
-                <div class="relay-buttons">
-                    <a href="/RELAY4=ON" class="btn btn-on">ON</a>
-                    <a href="/RELAY4=OFF" class="btn btn-off">OFF</a>
-                </div>
-                <div class="relay-state RELAY4_CLASS">État: RELAY4_STATE</div>
+        </div>
+
+        <div class="card">
+            <h3>Diagnostic Réseau</h3>
+            <div class="info-grid">
+                <p><strong>📡 Liaison :</strong> Ethernet Filaire (RJ45)</p>
+                <p><strong>🔌 IP Fixe :</strong> IP_PLACEHOLDER</p>
+                <p><strong>⚙️ Plateforme :</strong> Automate OPTA</p>
+                <p><strong>🌐 Ports ouverts :</strong> 502 (Modbus) & 80 (Web)</p>
             </div>
         </div>
         
-        <div class="inputs-section">
-            <h3>📥 État des Entrées</h3>
+        <div class="card">
+            <h3>Actionneurs (Relais)</h3>
+            <div class="relays-grid">
+                <div class="relay-card">
+                    <h4>Vanne Vapeur (R1)</h4>
+                    <div class="relay-buttons">
+                        <a href="/RELAY1=ON" class="btn btn-on">ON</a>
+                        <a href="/RELAY1=OFF" class="btn btn-off">OFF</a>
+                    </div>
+                    <div class="relay-state RELAY1_CLASS">RELAY1_STATE</div>
+                </div>
+                <div class="relay-card">
+                    <h4>Vanne Eau (R2)</h4>
+                    <div class="relay-buttons">
+                        <a href="/RELAY2=ON" class="btn btn-on">ON</a>
+                        <a href="/RELAY2=OFF" class="btn btn-off">OFF</a>
+                    </div>
+                    <div class="relay-state RELAY2_CLASS">RELAY2_STATE</div>
+                </div>
+                <div class="relay-card">
+                    <h4>Vidange (R3)</h4>
+                    <div class="relay-buttons">
+                        <a href="/RELAY3=ON" class="btn btn-on">ON</a>
+                        <a href="/RELAY3=OFF" class="btn btn-off">OFF</a>
+                    </div>
+                    <div class="relay-state RELAY3_CLASS">RELAY3_STATE</div>
+                </div>
+                <div class="relay-card">
+                    <h4>Alarme (R4)</h4>
+                    <div class="relay-buttons">
+                        <a href="/RELAY4=ON" class="btn btn-on">ON</a>
+                        <a href="/RELAY4=OFF" class="btn btn-off">OFF</a>
+                    </div>
+                    <div class="relay-state RELAY4_CLASS">RELAY4_STATE</div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="card">
+            <h3>Capteurs (Entrées Digitales)</h3>
             <div class="inputs-grid">
                 <div class="input-item">
                     <div class="input-label">I1</div>
@@ -167,23 +199,18 @@ void setup() {
   Serial.begin(115200);
   delay(2000);
   
-  Serial.println("\n=== Arduino OPTA - Serveur Web + Modbus ===");
+  Serial.println("\n=== Arduino OPTA - Serveur Web + Modbus (ETHERNET) ===");
   
   // Configuration LED
   pinMode(LED_BUILTIN, OUTPUT);
-  pinMode(LED_D0, OUTPUT);
-  pinMode(LED_D1, OUTPUT);
-  pinMode(LED_D2, OUTPUT);
-  pinMode(LED_D3, OUTPUT);
-  pinMode(LEDR, OUTPUT);
-  pinMode(LEDG, OUTPUT);
+  pinMode(LED_D0, OUTPUT); pinMode(LED_D1, OUTPUT);
+  pinMode(LED_D2, OUTPUT); pinMode(LED_D3, OUTPUT);
+  pinMode(LEDR, OUTPUT); pinMode(LEDG, OUTPUT);
+  
   digitalWrite(LED_BUILTIN, LOW);
-  digitalWrite(LED_D0, LOW);
-  digitalWrite(LED_D1, LOW);
-  digitalWrite(LED_D2, LOW);
-  digitalWrite(LED_D3, LOW);
-  digitalWrite(LEDR, LOW);   
-  digitalWrite(LEDG, LOW);   
+  digitalWrite(LED_D0, LOW); digitalWrite(LED_D1, LOW);
+  digitalWrite(LED_D2, LOW); digitalWrite(LED_D3, LOW);
+  digitalWrite(LEDR, LOW); digitalWrite(LEDG, LOW);   
   
   // Configuration bouton USER & Relais & Entrées
   pinMode(BTN_USER, INPUT_PULLUP);
@@ -196,86 +223,59 @@ void setup() {
   pinMode(I1, INPUT); pinMode(I2, INPUT); pinMode(I3, INPUT); pinMode(I4, INPUT);
   pinMode(I5, INPUT); pinMode(I6, INPUT); pinMode(I7, INPUT); pinMode(I8, INPUT);
   
-  // Connexion au WiFi
-  Serial.print("Connexion au WiFi: ");
-  Serial.println(ssid);
+  // Connexion Ethernet Filaire
+  Serial.println("Initialisation du reseau Ethernet...");
+  Ethernet.begin(mac, ip);
+  delay(1000);
   
-  WiFi.setHostname("Arduino-OPTA");
-  WiFi.begin(ssid, password);
+  Serial.println("\n✓ Reseau OK !");
+  Serial.print("Adresse IP: ");
+  Serial.println(Ethernet.localIP());
   
-  int timeout = 0;
-  bool isRed = true;
-  while (WiFi.status() != WL_CONNECTED && timeout < 20) {
-    if (isRed) {
-      digitalWrite(LEDR, HIGH);  digitalWrite(LEDG, LOW);   
-    } else {
-      digitalWrite(LEDR, LOW);   digitalWrite(LEDG, HIGH);  
-    }
-    isRed = !isRed;
-    delay(250);
-    Serial.print(".");
-    timeout++;
-  }
+  // Démarrage des serveurs
+  webServer.begin();
+  modbusServer.begin();
   
-  digitalWrite(LEDR, LOW);
-  digitalWrite(LEDG, LOW);
-  
-  if (WiFi.status() == WL_CONNECTED) {
-    Serial.println("\n✓ WiFi connecté!");
-    Serial.print("Adresse IP: ");
-    Serial.println(WiFi.localIP());
-    
-    // Démarrage des serveurs
-    webServer.begin();
-    modbusServer.begin();
-    
-    if (!modbusTCPServer.begin()) {
-      Serial.println("✗ Erreur initialisation Modbus !");
-    } else {
-      modbusTCPServer.configureHoldingRegisters(0x00, 3);
-      modbusTCPServer.holdingRegisterWrite(0x00, fausseTemperature);
-      modbusTCPServer.holdingRegisterWrite(0x01, 1);
-      modbusTCPServer.holdingRegisterWrite(0x02, 1100);
-      Serial.println("✓ Serveur Modbus démarré (Port 502)");
-    }
-    
-    Serial.println("✓ Serveur web démarré (Port 80)");
-    Serial.println("=============================\n");
-    
-    digitalWrite(LEDG, HIGH);  // Vert ON = OK
-    
-  } else {
-    Serial.println("\n✗ Échec de connexion WiFi");
+  if (!modbusTCPServer.begin()) {
+    Serial.println("✗ Erreur initialisation Modbus !");
     digitalWrite(LEDR, HIGH);  // Rouge ON = Erreur
+  } else {
+    modbusTCPServer.configureHoldingRegisters(0x00, 3);
+    modbusTCPServer.holdingRegisterWrite(0x00, fausseTemperature); // Reg 0 : Température
+    modbusTCPServer.holdingRegisterWrite(0x01, 1);                 // Reg 1 : Etat
+    modbusTCPServer.holdingRegisterWrite(0x02, 1100);              // Reg 2 : Consigne par défaut (110.0 °C)
+    Serial.println("✓ Serveur Modbus démarre (Port 502)");
+    digitalWrite(LEDG, HIGH);  // Vert ON = OK
   }
+  
+  Serial.println("✓ Serveur web démarre (Port 80)");
+  Serial.println("=============================\n");
 }
 
 void loop() {
   unsigned long currentMillis = millis();
 
   // ---------------------------------------------------------
-  // 1. ANIMATION DES LEDs (Sans bloquer le programme)
+  // 1. ANIMATION DES LEDs
   // ---------------------------------------------------------
   if (currentMillis - previousMillisLED >= 100) {
     previousMillisLED = currentMillis;
-    // On éteint tout d'abord
     digitalWrite(LED_D0, LOW); digitalWrite(LED_D1, LOW);
     digitalWrite(LED_D2, LOW); digitalWrite(LED_D3, LOW);
     
-    // On allume la bonne LED
     if(ledStep == 0) digitalWrite(LED_D0, HIGH);
     else if(ledStep == 1) digitalWrite(LED_D1, HIGH);
     else if(ledStep == 2) digitalWrite(LED_D2, HIGH);
     else if(ledStep == 3) digitalWrite(LED_D3, HIGH);
     
     ledStep++;
-    if (ledStep > 4) ledStep = 0; // Le pas 4 laisse tout éteint brièvement
+    if (ledStep > 4) ledStep = 0; 
   }
 
   // ---------------------------------------------------------
   // 2. GESTION DU MODBUS TCP (qModMaster)
   // ---------------------------------------------------------
-  WiFiClient modbusClient = modbusServer.available();
+  EthernetClient modbusClient = modbusServer.available();
   if (modbusClient) {
     modbusTCPServer.accept(modbusClient);
     if (modbusClient.connected()) {
@@ -294,7 +294,7 @@ void loop() {
   }
 
   // ---------------------------------------------------------
-  // 4. GESTION DU BOUTON USER (Test des relais)
+  // 4. GESTION DU BOUTON USER
   // ---------------------------------------------------------
   int buttonReading = digitalRead(BTN_USER);
   if (buttonReading != lastButtonState) {
@@ -302,23 +302,19 @@ void loop() {
   }
   
   if ((currentMillis - lastDebounceTime) > debounceDelay) {
-    if (buttonReading == LOW) {  // Bouton pressé
-      Serial.println("Test des relais depuis le bouton (1s chacun)...");
-      digitalWrite(RELAY1, HIGH); delay(1000); digitalWrite(RELAY1, LOW);
-      digitalWrite(RELAY2, HIGH); delay(1000); digitalWrite(RELAY2, LOW);
-      digitalWrite(RELAY3, HIGH); delay(1000); digitalWrite(RELAY3, LOW);
-      digitalWrite(RELAY4, HIGH); delay(1000); digitalWrite(RELAY4, LOW);
-      while(digitalRead(BTN_USER) == LOW) { delay(10); } // Attente relâchement
+    if (buttonReading == LOW) {  
+      Serial.println("Test des relais depuis le bouton...");
+      digitalWrite(RELAY1, !digitalRead(RELAY1));
+      while(digitalRead(BTN_USER) == LOW) { delay(10); } 
     }
   }
   lastButtonState = buttonReading;
 
   // ---------------------------------------------------------
-  // 5. GESTION DU SERVEUR WEB (Google Chrome)
+  // 5. GESTION DU SERVEUR WEB
   // ---------------------------------------------------------
-  WiFiClient webClient = webServer.available();
+  EthernetClient webClient = webServer.available();
   if (webClient) {
-    Serial.println("Nouveau client Web connecté");
     String currentLine = "";
     String request = "";
     
@@ -330,7 +326,7 @@ void loop() {
         if (c == '\n') {
           if (currentLine.length() == 0) {
             
-            // Traitement des boutons HTML pour piloter les relais
+            // Traitement des boutons HTML
             if (request.indexOf("GET /RELAY1=ON") >= 0) { digitalWrite(RELAY1, HIGH); }
             else if (request.indexOf("GET /RELAY1=OFF") >= 0) { digitalWrite(RELAY1, LOW); }
             else if (request.indexOf("GET /RELAY2=ON") >= 0) { digitalWrite(RELAY2, HIGH); }
@@ -346,14 +342,21 @@ void loop() {
             webClient.println("Connection: close");
             webClient.println();
             
+            // Formatage de l'adresse IP
+            String ipStr = String(Ethernet.localIP()[0]) + "." + 
+                           String(Ethernet.localIP()[1]) + "." + 
+                           String(Ethernet.localIP()[2]) + "." + 
+                           String(Ethernet.localIP()[3]);
+
+            // LECTURE DE LA CONSIGNE DIRECTEMENT DEPUIS LE MODBUS !
+            long consigneBrute = modbusTCPServer.holdingRegisterRead(0x02);
+            float consigneReelle = consigneBrute / 10.0;
+
             // Remplacement des Placeholders HTML
             String page = webpage;
-            page.replace("HOSTNAME_PLACEHOLDER", "Arduino-OPTA");
-            page.replace("SSID_PLACEHOLDER", WiFi.SSID());
-            page.replace("RSSI_PLACEHOLDER", String(WiFi.RSSI()));
-            page.replace("IP_PLACEHOLDER", WiFi.localIP().toString());
-            page.replace("MAC_PLACEHOLDER", WiFi.macAddress());
-            page.replace("TEMP_PLACEHOLDER", String(fausseTemperature / 10.0, 1)); // Ajout de la température Modbus
+            page.replace("IP_PLACEHOLDER", ipStr);
+            page.replace("TEMP_PLACEHOLDER", String(fausseTemperature / 10.0, 1));
+            page.replace("CONSIGNE_PLACEHOLDER", String(consigneReelle, 1)); // Injection de la consigne
             
             page.replace("INPUT1_STATE", digitalRead(I1) ? "●" : "○"); page.replace("INPUT1_CLASS", digitalRead(I1) ? "state-high" : "state-low");
             page.replace("INPUT2_STATE", digitalRead(I2) ? "●" : "○"); page.replace("INPUT2_CLASS", digitalRead(I2) ? "state-high" : "state-low");
