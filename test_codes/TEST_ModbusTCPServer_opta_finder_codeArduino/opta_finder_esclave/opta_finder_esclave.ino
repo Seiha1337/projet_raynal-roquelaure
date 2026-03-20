@@ -29,7 +29,7 @@ int etatMachine[MAX_AUTOCLAVES] = {0};
 float tempMachine[MAX_AUTOCLAVES] = {0.0};
 bool enLigne[MAX_AUTOCLAVES] = {false};
 
-// --- MOTEUR DE DIAGNOSTIC ---
+// --- MOTEUR DE DIAGNOSTIC BRUT (Style Syslog Linux/Proxmox) ---
 bool hasNewError = false;
 String lastErrorTitle = "";
 String lastDiagnostic = "";
@@ -45,32 +45,29 @@ void pingAndSync(int id) {
     if (tempBrute != -1) tempMachine[id] = tempBrute / 10.0;
     modbusTCPClient.stop();
   } else {
-    // GENERATION DE L'ERREUR INDUSTRIELLE
+    // GENERATION DE L'ERREUR RAW SYSTEM
     enLigne[id] = false;
     tempMachine[id] = 0.0;
     modbusTCPClient.stop();
     ethClient.stop();
 
     String ipStr = String(ipAutoclaves[id][0]) + "." + String(ipAutoclaves[id][1]) + "." + String(ipAutoclaves[id][2]) + "." + String(ipAutoclaves[id][3]);
+    float ts = millis() / 1000.0; // Timestamp en secondes
     
     hasNewError = true;
-    lastErrorTitle = "Échec Modbus TCP - Autoclave " + String(id+1);
+    lastErrorTitle = "syslog: connection timeout to " + ipStr;
     
-    // Formatage d'un Log de maintenance robuste
-    lastDiagnostic = "====================================\n";
-    lastDiagnostic += "RAPPORT DE DIAGNOSTIC - RAYNAL & ROQUELAURE\n";
-    lastDiagnostic += "Timestamp (ms) : " + String(millis()) + "\n";
-    lastDiagnostic += "Code Erreur    : ERR_TCP_TIMEOUT\n";
-    lastDiagnostic += "Cible IP       : " + ipStr + " (Port 502)\n";
-    lastDiagnostic += "====================================\n\n";
-    lastDiagnostic += "[ANALYSE]\n";
-    lastDiagnostic += "L'automate maitre (OPTA) n'a pas recu de reponse Modbus \n";
-    lastDiagnostic += "de l'esclave dans le delai imparti (250ms).\n\n";
-    lastDiagnostic += "[PROCEDURE DE MAINTENANCE HORS-LIGNE]\n";
-    lastDiagnostic += "1. Verifier la presence de tension 24V sur l'Autoclave " + String(id+1) + ".\n";
-    lastDiagnostic += "2. Controler l'etat de la LED 'Link' sur le switch Ethernet.\n";
-    lastDiagnostic += "3. Remplacer le cable RJ45 si le port clignote orange.\n";
-    lastDiagnostic += "4. S'assurer que le bouton d'Arret d'Urgence n'est pas enclenche.\n";
+    // Log format Proxmox / dmesg
+    lastDiagnostic = "[ " + String(ts, 3) + " ] modbus_tcp[502]: WARN: polling node " + ipStr + "...\n";
+    lastDiagnostic += "[ " + String(ts + 0.250, 3) + " ] modbus_tcp[502]: ERROR: connection timeout to " + ipStr + ":502\n";
+    lastDiagnostic += "[ " + String(ts + 0.251, 3) + " ] scada_daemon[110]: kernel: state transition node_" + String(id) + " -> FAULT\n";
+    lastDiagnostic += "[ " + String(ts + 0.251, 3) + " ] scada_daemon[110]: dropping node from active polling pool\n";
+    lastDiagnostic += "[ " + String(ts + 0.252, 3) + " ] opta_watchdog[42]: CHECK TRACE TRIGGERED:\n";
+    lastDiagnostic += "   - verify 24V PSU on remote node\n";
+    lastDiagnostic += "   - verify PHY link status (Switch LEDs)\n";
+    lastDiagnostic += "   - verify cabling (RJ45 pair mismatch)\n";
+    lastDiagnostic += "   - verify emergency stop loop status\n";
+    lastDiagnostic += "[ " + String(ts + 0.255, 3) + " ] opta_watchdog[42]: waiting for manual ACK or reconnect\n";
   }
 }
 
@@ -99,7 +96,15 @@ void loop() {
         if (c == '\n' && currentLineIsBlank) {
           
           // --- TRAITEMENT DES ORDRES AJAX ---
-          if (request.indexOf("GET /?scan=") >= 0) {
+          
+          // NOUVEAU : Requête d'actualisation en arrière-plan (Background Polling)
+          if (request.indexOf("GET /?bg_update=1") >= 0) {
+            for(int i = 0; i < nbAutoclaves; i++) {
+              if(enLigne[i]) pingAndSync(i); // Actualise uniquement ceux qui sont en ligne !
+            }
+          }
+          // Scan manuel (bouton CONNECTER)
+          else if (request.indexOf("GET /?scan=") >= 0) {
             int id = request.substring(request.indexOf("scan=") + 5, request.indexOf("scan=") + 7).toInt();
             if(id < nbAutoclaves) pingAndSync(id);
           }
@@ -161,7 +166,6 @@ void loop() {
           webClient.println(":root { --bg: #0f1012; --panel: #1a1b1e; --border: #2d2e32; --text: #e1e2e6; --red: #ff3333; --red-dark: #8b0000; --green: #00e676; --green-dark: #004d26; --yellow: #ffb800; --carnus: #005ce6; }");
           webClient.println("body { background: var(--bg); color: var(--text); font-family: system-ui, -apple-system, sans-serif; margin: 0; padding: 20px; }");
           
-          // CSS Supra-titre SCADA ajouté
           webClient.println(".supra-title { margin: 0 0 5px 0; color: var(--carnus); font-weight: 700; font-size: 0.85em; letter-spacing: 2px; text-transform: uppercase; }");
           
           webClient.println(".header { background: #0a0a0c; border-left: 6px solid var(--carnus); border-right: 6px solid var(--red); padding: 20px 25px; display: flex; justify-content: space-between; align-items: center; border-radius: 8px; border-bottom: 1px solid var(--border); margin-bottom: 25px; box-shadow: 0 4px 15px rgba(0,0,0,0.5); }");
@@ -204,8 +208,8 @@ void loop() {
           
           webClient.println(".modal { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.85); display: none; justify-content: center; align-items: center; z-index: 2000; backdrop-filter: blur(4px); }");
           webClient.println(".modal-content { background: #0a0a0c; border: 1px solid #333; width: 90%; max-width: 800px; padding: 25px; border-radius: 8px; box-shadow: 0 20px 50px rgba(0,0,0,0.5); }");
-          webClient.println(".modal h3 { color: #fff; margin: 0 0 20px 0; display: flex; justify-content: space-between; align-items: center; }");
-          webClient.println(".modal textarea { width: 100%; height: 350px; background: #050505; color: #00ff66; font-family: 'Courier New', monospace; padding: 15px; border: 1px solid #222; border-radius: 4px; resize: none; font-size: 0.95em; line-height: 1.5; box-sizing: border-box; }");
+          webClient.println(".modal h3 { color: #fff; margin: 0 0 20px 0; display: flex; justify-content: space-between; align-items: center; font-family: monospace;}");
+          webClient.println(".modal textarea { width: 100%; height: 350px; background: #050505; color: #d4d4d4; font-family: 'Courier New', monospace; padding: 15px; border: 1px solid #222; border-radius: 4px; resize: none; font-size: 0.95em; line-height: 1.5; box-sizing: border-box; }");
           webClient.println(".close-btn { background: transparent; color: #888; border: none; font-size: 1.5em; cursor: pointer; padding: 0; } .close-btn:hover { color: #fff; }");
           
           webClient.println(".spinner { display: none; width: 14px; height: 14px; border: 2px solid rgba(255,255,255,0.3); border-top-color: #fff; border-radius: 50%; animation: spin 0.8s linear infinite; }");
@@ -214,8 +218,20 @@ void loop() {
           
           webClient.println("</style>");
           
-          // --- JAVASCRIPT ---
+          // --- JAVASCRIPT & BACKGROUND POLLING ---
           webClient.println("<script>");
+          
+          // Fonction d'auto-actualisation (tourne en boucle en arrière-plan)
+          webClient.println("setInterval(() => {");
+          webClient.println("  if(document.querySelectorAll('.loading').length === 0 && document.getElementById('modal').style.display !== 'flex') {");
+          webClient.println("    fetch('/?bg_update=1').then(r=>r.text()).then(html=>{");
+          webClient.println("      let parser = new DOMParser(); let doc = parser.parseFromString(html, 'text/html');");
+          webClient.println("      document.getElementById('dashboard').innerHTML = doc.getElementById('dashboard').innerHTML;");
+          webClient.println("      checkErrors(doc);");
+          webClient.println("    }).catch(e=>{});"); // Fail silencieux pour le background
+          webClient.println("  }");
+          webClient.println("}, 2000);"); // Rafraîchissement toutes les 2 secondes
+          
           webClient.println("function sendReq(btn, url) {");
           webClient.println("  btn.classList.add('loading'); btn.disabled = true;");
           webClient.println("  fetch(url).then(r=>r.text()).then(html=>{");
@@ -254,9 +270,8 @@ void loop() {
           hasNewError = false;
 
           webClient.println("<div id='toast' class='toast'><h4 id='t-title'>Erreur</h4><button onclick='showLogs()'>VOIR LE DIAGNOSTIC</button></div>");
-          webClient.println("<div id='modal' class='modal'><div class='modal-content'><h3><span>>_ TERMINAL DE MAINTENANCE</span><button class='close-btn' onclick='closeLogs()'>&times;</button></h3><textarea id='log-text' readonly></textarea></div></div>");
+          webClient.println("<div id='modal' class='modal'><div class='modal-content'><h3><span>>_ root@opta-master:~# tail -f /var/log/syslog</span><button class='close-btn' onclick='closeLogs()'>&times;</button></h3><textarea id='log-text' readonly></textarea></div></div>");
 
-          // Ligne modifiée avec le nouveau supra-titre !
           webClient.println("<div class='header'><div><p class='supra-title'>Supervisory Control And Data Acquisition</p><h1>SCADA // RAYNAL & ROQUELAURE</h1></div><div class='status'>SYS.OK _</div></div>");
           
           webClient.println("<div class='controls'>");
