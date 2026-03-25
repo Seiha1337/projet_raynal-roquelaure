@@ -4,7 +4,6 @@ console.log("==========================================================");
 console.log(" 🖥️ SCADA PC : SUPERVISION DES 6 AUTOCLAVES EN DIRECT");
 console.log("==========================================================");
 
-// Ton plan d'adressage (Tu pourras compléter les vraies adresses MAC des ESP32 plus tard)
 const autoclaves = [
     { id: "Autoclave 1 (OPTA)", ip: "192.168.50.50", mac: "A8:61:0A:AE:76:05" },
     { id: "Autoclave 2 (ESP32)", ip: "192.168.50.51", mac: "XX:XX:XX:XX:XX:XX" },
