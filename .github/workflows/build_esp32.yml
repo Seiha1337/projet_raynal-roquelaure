@@ -1,0 +1,27 @@
+name: CI - Vérification Firmware ESP32
+
+# Le robot s'active à chaque push sur la branche principale
+on:
+  push:
+    branches: [ "main", "master" ]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest # Le serveur cloud tourne sous Linux
+
+    steps:
+    - name: 📥 Récupération du code source
+      uses: actions/checkout@v4
+
+    - name: 🐍 Installation de Python (Requis pour PlatformIO)
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.10'
+
+    - name: ⚙️ Installation de PlatformIO
+      run: pip install -U platformio
+
+    - name: 🚀 Compilation du Firmware (ESP32 Autoclaves)
+      run: |
+        cd Firmware/ESP32_Slaves_Autoclaves
+        pio run
