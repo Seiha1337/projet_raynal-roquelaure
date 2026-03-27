@@ -1,4 +1,6 @@
 # 🏭 Projet SCADA & Automatisme - Raynal & Roquelaure
+![CI - Vérification Firmware ESP32](https://github.com/Seiha1337/Projet-Raynal-Roquelaure/actions/workflows/build_esp32.yml/badge.svg)
+
 
 ## 📖 Contexte du Projet
 Projet de fin d'études (BTS) réalisé pour l'entreprise **Raynal & Roquelaure**. 
