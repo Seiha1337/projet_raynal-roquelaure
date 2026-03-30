@@ -168,7 +168,7 @@ void loop() {
 
     // --- SYNCHRONISATION MODBUS ---
     mb.Hreg(REG_TEMP, (uint16_t)(temperature * 10));
-    mb.Hreg(REG_STATE, cycleState); // Correction vitale pour le suivi du PC
+    mb.Hreg(REG_STATE, cycleState);
 
     // --- RAFRAICHISSEMENT ECRAN TFT ---
     
