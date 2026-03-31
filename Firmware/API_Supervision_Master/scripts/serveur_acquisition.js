@@ -1,7 +1,7 @@
 const ModbusRTU = require("modbus-serial");
 
 console.log("==========================================================");
-console.log(" 🖥️ SCADA PC : SUPERVISION DES 6 AUTOCLAVES EN DIRECT");
+console.log(" 🖥️ SUPERVISION DES 6 AUTOCLAVES : RAYNAL & ROQUELAURE");
 console.log("==========================================================");
 
 const autoclaves = [
@@ -13,23 +13,23 @@ const autoclaves = [
     { id: "Autoclave 6 (ESP32)", ip: "192.168.50.55", mac: "XX:XX:XX:XX:XX:XX" }
 ];
 
+// Petite fonction utilitaire pour créer une pause
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
 async function scruterAutoclave(machine) {
     const client = new ModbusRTU();
-    client.setTimeout(2000); // On n'attend pas plus de 2s si la machine est éteinte
+    client.setTimeout(2000); 
 
     try {
-        // Connexion à l'autoclave
         await client.connectTCP(machine.ip, { port: 502 });
         client.setID(1);
 
-        // Lecture de la Température (0), l'État (1) et la Consigne (2)
         const data = await client.readHoldingRegisters(0, 3);
         
         const temperature = data.data[0] / 10.0;
         const etatMachine = data.data[1];
         const consigne = data.data[2] / 10.0;
 
-        // Traduction de l'état pour savoir si ça chauffe
         let etatTexte = "Arrêt";
         let chauffeActuelle = "OFF";
         
@@ -44,21 +44,36 @@ async function scruterAutoclave(machine) {
             chauffeActuelle = "OFF ❄️";
         }
 
-        // Affichage formaté dans le terminal
         console.log(`[🟢 EN LIGNE] ${machine.id}`);
         console.log(`    ├─ Réseau   : IP ${machine.ip} | MAC ${machine.mac}`);
         console.log(`    ├─ Process  : Temp = ${temperature}°C | Consigne = ${consigne}°C`);
         console.log(`    └─ Machine  : Cycle = ${etatTexte} | Relais Chauffe = ${chauffeActuelle}\n`);
 
-        client.close();
-
     } catch (e) {
         console.log(`[🔴 HORS LIGNE] ${machine.id} (IP: ${machine.ip}) - Erreur: ${e.message}\n`);
+    } finally {
+        client.close();
     }
 }
 
-// Lancement de la scrutation toutes les 5 secondes
-setInterval(() => {
-    console.log("----------------------------------------------------------");
-    autoclaves.forEach(machine => scruterAutoclave(machine));
-}, 5000);
+async function bouclePrincipale() {
+    while (true) {
+        console.log("----------------------------------------------------------");
+        console.log(`🕒 Début de la scrutation : ${new Date().toLocaleTimeString()}`);
+        
+        // On attend que TOUTES les machines soient scrutées l'une après l'autre
+        for (const machine of autoclaves) {
+            await scruterAutoclave(machine);
+        }
+
+        console.log("✅ Cycle complet terminé.");
+        console.log("💤 Attente de 5 secondes avant le prochain passage...");
+        console.log("----------------------------------------------------------\n");
+        
+        // C'est ici que l'on marque la pause de 5 secondes APRES le travail
+        await sleep(5000);
+    }
+}
+
+// Lancement de la boucle infinie
+bouclePrincipale();
