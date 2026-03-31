@@ -17,9 +17,10 @@
 #define ETH_PHY_TYPE  ETH_PHY_LAN8720
 #define ETH_CLK_MODE  ETH_CLOCK_GPIO0_IN
 
-// --- Paramètres Réseau (Autoclave 2 = .51) ---
-IPAddress local_ip(192, 168, 50, 51); 
-IPAddress gateway(192, 168, 50, 1);
+// --- Paramètres Réseau (Réseau unifié IT/OT) ---
+// Nouvelle plage IP pour correspondre au serveur MariaDB
+IPAddress local_ip(172, 40, 1, 51); 
+IPAddress gateway(172, 40, 1, 1);
 IPAddress subnet(255, 255, 255, 0);
 
 // --- Objets ---
