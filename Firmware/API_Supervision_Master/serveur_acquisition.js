@@ -1,7 +1,7 @@
 require('dotenv').config(); 
 const ModbusRTU = require("modbus-serial");
 const mysql = require("mysql2/promise");
-const express = require('express'); // 🆕 Ajout du module Web
+const express = require('express');
 
 // ==========================================================
 // 🛡️ CONFIGURATION & MÉMOIRE DES INCIDENTS
@@ -9,9 +9,8 @@ const express = require('express'); // 🆕 Ajout du module Web
 const DELAI_LOG_INCIDENT = 10 * 60 * 1000; 
 const derniersIncidentsEnregistres = {}; 
 
-// Initialisation de l'API Express
 const app = express();
-app.use(express.json()); // 🆕 Permet de comprendre les données envoyées par Nathan
+app.use(express.json()); 
 
 // ==========================================================
 // 🛡️ BOUCLIER ANTI-CRASH GLOBAL
@@ -39,19 +38,25 @@ const pool = mysql.createPool({
     queueLimit: 0
 });
 
+// 🌐 NOUVELLE PLAGE IP (172.40.45.20 à 172.40.45.30)
 const autoclaves = [
-    { id: "Autoclave 1 (OPTA)", ip: "172.40.1.50", mac: "A8:61:0A:AE:76:05" },
-    { id: "Autoclave 2 (ESP32)", ip: "172.40.1.51", mac: "XX:XX:XX:XX:XX:XX" },
-    { id: "Autoclave 3 (ESP32)", ip: "172.40.1.52", mac: "XX:XX:XX:XX:XX:XX" },
-    { id: "Autoclave 4 (ESP32)", ip: "172.40.1.53", mac: "XX:XX:XX:XX:XX:XX" },
-    { id: "Autoclave 5 (ESP32)", ip: "172.40.1.54", mac: "XX:XX:XX:XX:XX:XX" },
-    { id: "Autoclave 6 (ESP32)", ip: "172.40.1.55", mac: "XX:XX:XX:XX:XX:XX" }
+    { id: "Autoclave 1 (OPTA)",  ip: "172.40.45.20", mac: "A8:61:0A:AE:76:05" },
+    { id: "Autoclave 2 (ESP32)", ip: "172.40.45.21", mac: "XX:XX:XX:XX:XX:XX" },
+    { id: "Autoclave 3 (ESP32)", ip: "172.40.45.22", mac: "XX:XX:XX:XX:XX:XX" },
+    { id: "Autoclave 4 (ESP32)", ip: "172.40.45.23", mac: "XX:XX:XX:XX:XX:XX" },
+    { id: "Autoclave 5 (ESP32)", ip: "172.40.45.24", mac: "XX:XX:XX:XX:XX:XX" },
+    { id: "Autoclave 6 (ESP32)", ip: "172.40.45.25", mac: "XX:XX:XX:XX:XX:XX" },
+    { id: "Autoclave 7 (ESP32)", ip: "172.40.45.26", mac: "XX:XX:XX:XX:XX:XX" },
+    { id: "Autoclave 8 (ESP32)", ip: "172.40.45.27", mac: "XX:XX:XX:XX:XX:XX" },
+    { id: "Autoclave 9 (ESP32)", ip: "172.40.45.28", mac: "XX:XX:XX:XX:XX:XX" },
+    { id: "Autoclave 10 (ESP32)",ip: "172.40.45.29", mac: "XX:XX:XX:XX:XX:XX" },
+    { id: "Autoclave 11 (ESP32)",ip: "172.40.45.30", mac: "XX:XX:XX:XX:XX:XX" }
 ];
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
 // ==========================================================
-// 📥 API D'ÉCOUTE POUR LA COMMANDE OPERATEUR (DESCENTE)
+// 📥 API D'ÉCOUTE POUR LA CONSIGNE (DESCENTE)
 // ==========================================================
 app.post('/api/consigne', async (req, res) => {
     const ipMachine = req.body.ip; 
@@ -70,10 +75,7 @@ app.post('/api/consigne', async (req, res) => {
         await clientCommande.connectTCP(ipMachine, { port: 502 });
         clientCommande.setID(1); 
 
-        // Les automates attendent souvent une valeur multipliée par 10 pour la précision
         const valeurModbus = Math.round(nouvelleConsigne * 10); 
-        
-        // Adresse 2 = L'adresse du registre de consigne (à adapter selon ta doc Modbus)
         await clientCommande.writeRegister(2, valeurModbus); 
 
         console.log(`✅ [SUCCÈS] Consigne transmise à l'automate !`);
@@ -81,6 +83,39 @@ app.post('/api/consigne', async (req, res) => {
 
     } catch (e) {
         console.error(`❌ [ÉCHEC] Impossible d'envoyer la commande :`, e.message);
+        res.status(500).json({ erreur: "Erreur de communication avec l'autoclave" });
+    } finally {
+        clientCommande.close();
+    }
+});
+
+// ==========================================================
+// 🚀 API D'ÉCOUTE POUR L'ÉTAT MARCHE/ARRÊT
+// ==========================================================
+app.post('/api/etat', async (req, res) => {
+    const ipMachine = req.body.ip; 
+    const etat = req.body.etat; 
+
+    if (!ipMachine || etat === undefined) {
+        return res.status(400).json({ erreur: "IP ou état manquant" });
+    }
+
+    console.log(`\n⚙️ [COMMANDE OPÉRATEUR] Modification de l'état (${etat}) vers ${ipMachine}...`);
+
+    const clientCommande = new ModbusRTU();
+    clientCommande.setTimeout(2000);
+
+    try {
+        await clientCommande.connectTCP(ipMachine, { port: 502 });
+        clientCommande.setID(1); 
+        
+        await clientCommande.writeRegister(1, etat); 
+
+        console.log(`✅ [SUCCÈS] État transmis à l'automate !`);
+        res.status(200).json({ message: "Ordre appliqué avec succès", nouvel_etat: etat });
+
+    } catch (e) {
+        console.error(`❌ [ÉCHEC] Impossible d'envoyer l'état :`, e.message);
         res.status(500).json({ erreur: "Erreur de communication avec l'autoclave" });
     } finally {
         clientCommande.close();
@@ -204,12 +239,10 @@ async function bouclePrincipale() {
 // 🚀 LANCEMENT GLOBAL
 // ==========================================================
 
-// 1. Démarrage de l'écoute des requêtes Web (Nathan)
 app.listen(3000, () => {
     console.log("👂 API Commande : En écoute sur le port 3000 (Prête pour le site web)");
 });
 
-// 2. Démarrage de la connexion BDD et de la boucle de scrutation
 pool.getConnection()
     .then(conn => {
         console.log(`✅ Connexion MariaDB réussie (${process.env.DB_HOST})`);
