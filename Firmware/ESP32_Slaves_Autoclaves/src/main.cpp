@@ -1,7 +1,7 @@
 // ╔══════════════════════════════════════════════════════════╗
 // ║      SIMULATEUR AUTOCLAVE - RAYNAL & ROQUELAURE          ║
 // ║      - Modbus TCP Server pour PC SCADA (Port 502)        ║
-// ║      - UI TFT Modernisée                                 ║
+// ║      - UI TFT Modernisée (Design Industriel Sombre)      ║
 // ╚══════════════════════════════════════════════════════════╝
 
 #include <Arduino.h>
@@ -17,9 +17,8 @@
 #define ETH_PHY_TYPE  ETH_PHY_LAN8720
 #define ETH_CLK_MODE  ETH_CLOCK_GPIO0_IN
 
-// --- Paramètres Réseau (Réseau unifié IT/OT) ---
-// Nouvelle plage IP pour correspondre au serveur MariaDB
-IPAddress local_ip(172, 40, 45, 22); 
+// --- Paramètres Réseau ---
+IPAddress local_ip(172, 40, 45, 21); 
 IPAddress gateway(172, 40, 45, 1);
 IPAddress subnet(255, 255, 255, 0);
 
@@ -39,14 +38,13 @@ int cycleState = 0;
 int timerSterilisation = 0;
 unsigned long lastUpdate = 0;
 
-// Variables de Régulation TOR
+// Variables de Régulation TOR (Tourne en arrière-plan)
 bool relaisChauffe = false; 
 const float HYSTERESIS = 2.0;
 
 // Variables anti-scintillement écran
 int lastState = -1; 
 float lastConsigne = -1.0;
-bool lastRelais = !relaisChauffe;
 
 // --- Palette de couleurs "Dark UI" ---
 #define COLOR_BG       tft.color565(15, 15, 20)   // Fond très sombre
@@ -57,26 +55,47 @@ bool lastRelais = !relaisChauffe;
 void drawStaticUI() {
   tft.fillScreen(COLOR_BG);
   
-  // Header principal
-  tft.fillRoundRect(5, 5, 230, 40, 6, COLOR_RR_RED);
+  // --- 1. En-tête industriel ---
+  tft.fillRect(0, 0, 240, 45, COLOR_RR_RED);
   tft.setTextColor(TFT_WHITE, COLOR_RR_RED);
   tft.setTextDatum(MC_DATUM); 
-  tft.drawString("RAYNAL & ROQUELAURE", 120, 18, 2);
+  tft.drawString("RAYNAL & ROQUELAURE", 120, 15, 2);
   tft.setTextColor(TFT_YELLOW, COLOR_RR_RED);
-  tft.drawString("AUTOCLAVE 2", 120, 33, 1);
+  tft.drawString("AUTOCLAVE 1 - SCADA", 120, 32, 1);
+  tft.drawFastHLine(0, 45, 240, TFT_WHITE);
 
-  // Carte 1 : Processus (Température & Consigne)
-  tft.fillRoundRect(5, 55, 230, 115, 8, COLOR_CARD);
+  // --- 2. Panneau central (Température Process) ---
+  tft.drawRoundRect(10, 50, 220, 95, 8, COLOR_TEXT_DIM);
+  tft.fillRoundRect(11, 51, 218, 93, 8, COLOR_CARD);
   tft.setTextColor(COLOR_TEXT_DIM, COLOR_CARD);
-  tft.setTextDatum(TL_DATUM); 
-  tft.drawString("TEMPERATURE C.", 15, 65, 2);
-  tft.drawString("CONSIGNE SV.", 15, 145, 2);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString("TEMPERATURE PROCESS", 120, 60, 2);
+  tft.drawFastHLine(20, 75, 200, COLOR_TEXT_DIM);
 
-  // Carte 2 : Système (Statut & Relais)
-  tft.fillRoundRect(5, 180, 230, 55, 8, COLOR_CARD);
+  // --- 3. Zone de contrôle ---
+  // Encart Consigne (Gauche)
+  tft.drawRoundRect(10, 155, 105, 80, 6, COLOR_TEXT_DIM);
+  tft.fillRoundRect(11, 156, 103, 78, 6, COLOR_CARD);
   tft.setTextColor(COLOR_TEXT_DIM, COLOR_CARD);
-  tft.setTextDatum(TL_DATUM); 
-  tft.drawString("Vanne Vapeur :", 15, 190, 2);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString("CONSIGNE", 62, 165, 2);
+
+  // Encart Phase (Droite)
+  tft.drawRoundRect(125, 155, 105, 80, 6, COLOR_TEXT_DIM);
+  tft.fillRoundRect(126, 156, 103, 78, 6, COLOR_CARD);
+  tft.setTextColor(COLOR_TEXT_DIM, COLOR_CARD);
+  tft.setTextDatum(TC_DATUM);
+  tft.drawString("PHASE", 177, 165, 2); 
+
+  // --- 4. Pied de page (Statut Système) ---
+  tft.fillRect(0, 245, 240, 35, COLOR_CARD); 
+  tft.drawFastHLine(0, 245, 240, COLOR_TEXT_DIM);
+  tft.drawFastHLine(0, 279, 240, COLOR_TEXT_DIM);
+  
+  // --- 5. Pied de page Matériel ---
+  tft.setTextColor(TFT_WHITE, COLOR_BG);
+  tft.setTextDatum(MC_DATUM);
+  tft.drawString("ESP32 TFT CONTROLLER", 120, 300, 1);
 }
 
 void setup() {
@@ -102,130 +121,103 @@ void setup() {
 void loop() {
   mb.task();
 
-  // 1. LECTURE DES ORDRES DU MAITRE (PC SCADA)
+  // LECTURE SCADA
   uint16_t consigneModbus = mb.Hreg(REG_CONSIGNE);
   if (consigneModbus > 1100) { consigneModbus = 1100; mb.Hreg(REG_CONSIGNE, 1100); }
   consigne = consigneModbus / 10.0;
-
   uint16_t ordreMaitre = mb.Hreg(REG_STATE);
+  if (ordreMaitre == 0 && cycleState != 0 && cycleState != 3) cycleState = 3; 
 
-  // Si le SCADA ordonne l'arrêt d'urgence
-  if (ordreMaitre == 0 && cycleState != 0 && cycleState != 3) {
-    cycleState = 3; 
-  }
-
-  // 2. MOTEUR DE SIMULATION (Toutes les 1s)
+  // MOTEUR SIMULATION
   if (millis() - lastUpdate > 1000) {
     lastUpdate = millis();
 
     switch (cycleState) {
-      case 0: // REPOS
-        temperature = 20.0; 
-        relaisChauffe = false;
-        if (ordreMaitre == 1) { cycleState = 1; }
+      case 0:
+        temperature = 20.0; relaisChauffe = false;
+        if (ordreMaitre == 1) cycleState = 1; 
         break;
-
-      case 1: // CHAUFFE OU AJUSTEMENT
-        if (temperature < (consigne - HYSTERESIS)) {
-          relaisChauffe = true;
-          temperature += 2.5; 
-        } 
-        else if (temperature > (consigne + HYSTERESIS)) {
-          relaisChauffe = false;
-          temperature -= 1.5; 
-        } 
+      case 1:
+        if (temperature < (consigne - HYSTERESIS)) { relaisChauffe = true; temperature += 2.5; } 
+        else if (temperature > (consigne + HYSTERESIS)) { relaisChauffe = false; temperature -= 1.5; } 
+        else { relaisChauffe = false; cycleState = 2; timerSterilisation = 0; }
+        break;
+      case 2:
+        if (abs(temperature - consigne) > (HYSTERESIS + 2.0)) cycleState = 1; 
         else {
-          relaisChauffe = false;
-          cycleState = 2; 
-          timerSterilisation = 0; 
-        }
-        break;
-
-      case 2: // STERILISATION
-        if (abs(temperature - consigne) > (HYSTERESIS + 2.0)) {
-          cycleState = 1; 
-        } else {
           if (temperature <= (consigne - HYSTERESIS)) relaisChauffe = true;
           if (temperature >= (consigne + HYSTERESIS)) relaisChauffe = false;
-
-          if (relaisChauffe) temperature += 0.8; 
-          else temperature -= 0.6;              
-
+          if (relaisChauffe) temperature += 0.8; else temperature -= 0.6;              
           timerSterilisation++; 
-          if (timerSterilisation > 60) {
-            cycleState = 3;
-          }
+          if (timerSterilisation > 60) cycleState = 3;
         }
         break;
-
-      case 3: // REFROIDISSEMENT FINAL
-        relaisChauffe = false;
-        temperature -= 3.0; 
-        if (temperature <= 20.0) {
-          cycleState = 0; 
-        }
+      case 3:
+        relaisChauffe = false; temperature -= 3.0; 
+        if (temperature <= 20.0) cycleState = 0; 
         break;
     }
 
-    // --- SYNCHRONISATION MODBUS ---
+    // SYNCHRO MODBUS
     mb.Hreg(REG_TEMP, (uint16_t)(temperature * 10));
     mb.Hreg(REG_STATE, cycleState);
 
-    // --- RAFRAICHISSEMENT ECRAN TFT ---
+    // --- RAFRAICHISSEMENT ECRAN ---
     
-    // Affichage de l'état du cycle (en bas de la carte 2)
-    if (cycleState != lastState) {
-      tft.setTextDatum(MC_DATUM);
-      tft.fillRoundRect(15, 210, 210, 20, 4, COLOR_BG); // Efface l'ancien texte
-      
-      if (cycleState == 0) { tft.setTextColor(TFT_DARKGREY, COLOR_BG); tft.drawString("MACHINE EN REPOS", 120, 220, 2); }
-      if (cycleState == 1) { 
-        if (temperature < consigne) {
-          tft.setTextColor(TFT_ORANGE, COLOR_BG); tft.drawString("MONTEE EN TEMPERATURE", 120, 220, 2); 
-        } else {
-          tft.setTextColor(TFT_ORANGE, COLOR_BG); tft.drawString("AJUSTEMENT THERMIQUE", 120, 220, 2); 
-        }
-      }
-      if (cycleState == 2) { tft.setTextColor(TFT_GREEN, COLOR_BG); tft.drawString("STERILISATION EN COURS", 120, 220, 2); }
-      if (cycleState == 3) { tft.setTextColor(TFT_CYAN, COLOR_BG); tft.drawString("REFROIDISSEMENT...", 120, 220, 2); }
-      lastState = cycleState;
-    }
-
-    // Affichage des valeurs numériques (Carte 1)
+    // B. Température Actuelle
     tft.setTextDatum(MC_DATUM); 
     tft.setTextColor(TFT_WHITE, COLOR_CARD);
-    
-    // Redessine uniquement la zone du chiffre pour éviter les clignotements
-    tft.fillRect(40, 85, 160, 45, COLOR_CARD);
+    tft.fillRect(20, 80, 200, 55, COLOR_CARD); // Zone de rafraîchissement
     char tempStr[10];
     sprintf(tempStr, "%.1f C", temperature);
-    tft.drawString(tempStr, 120, 110, 6); 
+    tft.drawString(tempStr, 120, 105, 6); 
 
+    // C. Consigne
     if (consigne != lastConsigne) {
-      tft.setTextDatum(MR_DATUM);
-      tft.fillRect(130, 140, 100, 25, COLOR_CARD); 
-      tft.setTextColor(TFT_CYAN, COLOR_CARD);
+      tft.setTextDatum(MC_DATUM);
+      tft.fillRect(15, 185, 95, 45, COLOR_CARD); // Nettoyage de la zone
+      tft.setTextColor(TFT_WHITE, COLOR_CARD);
       char consStr[10];
       sprintf(consStr, "%.1f C", consigne);
-      tft.drawString(consStr, 225, 152, 4); 
+      tft.drawString(consStr, 62, 207, 4); // Parfaitement centré
       lastConsigne = consigne;
-      lastState = -1; // Force le rafraîchissement du statut
     }
 
-    // Affichage du Relais (Carte 2)
-    if (relaisChauffe != lastRelais) {
-      tft.setTextDatum(ML_DATUM);
-      tft.fillRect(150, 185, 70, 20, COLOR_CARD);
-      if (relaisChauffe) {
-        tft.fillRoundRect(150, 185, 60, 20, 4, TFT_GREEN);
+    // D. Encart de Phase (Remplace totalement l'ancienne vanne) et Bandeau Statut
+    if (cycleState != lastState) {
+      // 1. Mise à jour de la boîte PHASE
+      tft.setTextDatum(MC_DATUM);
+      tft.fillRect(128, 185, 99, 45, COLOR_CARD); // Nettoie la zone du badge
+      
+      if (cycleState == 0) {
+        tft.fillRoundRect(132, 190, 91, 35, 6, tft.color565(60, 60, 70));
+        tft.setTextColor(TFT_WHITE, tft.color565(60, 60, 70));
+        tft.drawString("REPOS", 177, 207, 2);
+      } 
+      else if (cycleState == 1) {
+        tft.fillRoundRect(132, 190, 91, 35, 6, TFT_ORANGE);
+        tft.setTextColor(TFT_BLACK, TFT_ORANGE);
+        tft.drawString("CHAUFFE", 177, 207, 2);
+      } 
+      else if (cycleState == 2) {
+        tft.fillRoundRect(132, 190, 91, 35, 6, TFT_GREEN);
         tft.setTextColor(TFT_BLACK, TFT_GREEN);
-        tft.drawString(" ON ", 165, 195, 2);
-      } else {
-        tft.fillRoundRect(150, 185, 60, 20, 4, COLOR_BG);
-        tft.setTextColor(TFT_WHITE, COLOR_BG);
-        tft.drawString(" OFF", 165, 195, 2);
+        tft.drawString("STERIL.", 177, 207, 2);
+      } 
+      else if (cycleState == 3) {
+        tft.fillRoundRect(132, 190, 91, 35, 6, TFT_CYAN);
+        tft.setTextColor(TFT_BLACK, TFT_CYAN);
+        tft.drawString("REFROID.", 177, 207, 2);
       }
-      lastRelais = relaisChauffe;
+
+      // 2. Mise à jour du Bandeau de Statut (en bas)
+      tft.fillRect(0, 246, 240, 33, COLOR_CARD); // Nettoie le bandeau
+      if (cycleState == 0) { tft.setTextColor(TFT_DARKGREY, COLOR_CARD); tft.drawString("MACHINE EN REPOS", 120, 262, 2); }
+      if (cycleState == 1) { tft.setTextColor(TFT_ORANGE, COLOR_CARD); tft.drawString("MONTEE THERMIQUE", 120, 262, 2); }
+      if (cycleState == 2) { tft.setTextColor(TFT_GREEN, COLOR_CARD); tft.drawString("STERILISATION EN COURS", 120, 262, 2); }
+      if (cycleState == 3) { tft.setTextColor(TFT_CYAN, COLOR_CARD); tft.drawString("BAISSE DE TEMPERATURE", 120, 262, 2); }
+      
+      lastState = cycleState;
     }
   }
 }
